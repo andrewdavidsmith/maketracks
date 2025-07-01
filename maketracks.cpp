@@ -322,16 +322,21 @@ main(int argc, char *argv[]) -> int {  // NOLINT(*-c-arrays)
       return EXIT_FAILURE;
     }
 
+    lgr.info("Making levels bigWig track");
+    const auto levels_start = std::chrono::high_resolution_clock::now();
     auto format_site_levels = [](auto &buf, const std::uint32_t pos,
                                  const big_mcount_pair &p) {
       return std::sprintf(buf.data(), "%d %0.6g\n", pos + 1, p.get_level());
     };
-
     auto outfile =
       std::filesystem::path{outdir} / std::format("{}.meth.wig", merged_name);
-
     write_bigwig(outfile, bmeth, index, format_site_levels);
+    const auto levels_stop = std::chrono::high_resolution_clock::now();
+    lgr.debug("Time to make levels bigWig track: {:.3}s",
+              duration(levels_start, levels_stop));
 
+    lgr.info("Making reads bigWig track");
+    const auto reads_start = std::chrono::high_resolution_clock::now();
     auto format_site_reads = [](auto &buf, const std::uint32_t pos,
                                 const big_mcount_pair &p) {
       return std::sprintf(buf.data(), "%d %d\n", pos + 1, p.n_reads());
@@ -341,6 +346,9 @@ main(int argc, char *argv[]) -> int {  // NOLINT(*-c-arrays)
       std::filesystem::path{outdir} / std::format("{}.reads.wig", merged_name);
 
     write_bigwig(outfile, bmeth, index, format_site_reads);
+    const auto reads_stop = std::chrono::high_resolution_clock::now();
+    lgr.debug("Time to make reads bigWig track: {:.3}s",
+              duration(reads_start, reads_stop));
   }
   catch (const std::exception &e) {
     std::cerr << e.what() << std::endl;
