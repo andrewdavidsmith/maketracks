@@ -94,7 +94,7 @@ struct big_methylome {
   std::vector<big_mcount_pair> cpgs{};
 
   big_methylome() = default;
-  big_methylome(const std::integral auto n_cpgs) :
+  explicit big_methylome(const std::integral auto n_cpgs) :
     cpgs(std::vector<big_mcount_pair>(n_cpgs)) {}
 
   auto
@@ -175,9 +175,9 @@ merge_methylomes(const std::vector<std::string> &methylome_names,
 }
 
 static inline auto
-write_bigwig(const std::string outfile, const big_methylome &bmeth,
+write_bigwig(const std::string &outfile, const big_methylome &bmeth,
              const xfr::genome_index &index, const auto &format_site) {
-  static constexpr auto buf_size = 128u;
+  static constexpr auto buf_size = 128;
   std::array<char, buf_size> buf{};
 
   std::ofstream out(outfile);
@@ -191,14 +191,15 @@ write_bigwig(const std::string outfile, const big_methylome &bmeth,
   const auto zipped =
     std::views::zip(index.data.positions, index.meta.chrom_order);
   for (const auto [positions, chrom_name] : zipped) {
-    const int m = std::sprintf(buf.data(), "variableStep chrom=%s span=1\n",
-                               chrom_name.data());
-    if (m <= 0)
+    const int m =
+      std::snprintf(buf.data(), buf_size, "variableStep chrom=%s span=1\n",
+                    chrom_name.data());
+    if (m < 0 || m > buf_size)
       throw std::runtime_error("failed writing output");
     out.write(buf.data(), m);
     for (const auto pos : positions) {
       if (*cpg_itr != big_mcount_pair{}) {
-        const int n = format_site(buf, pos, *cpg_itr);
+        const int n = format_site(buf, buf_size, pos, *cpg_itr);
         if (n <= 0)
           throw std::runtime_error("failed writing output");
         out.write(buf.data(), n);
@@ -209,9 +210,9 @@ write_bigwig(const std::string outfile, const big_methylome &bmeth,
 }
 
 static inline auto
-write_sym(const std::string outfile, const big_methylome &bmeth,
+write_sym(const std::string &outfile, const big_methylome &bmeth,
           const xfr::genome_index &index) {
-  static constexpr auto buf_size = 128u;
+  static constexpr auto buf_size = 128;
   std::array<char, buf_size> buf{};
 
   std::ofstream out(outfile);
@@ -223,17 +224,18 @@ write_sym(const std::string outfile, const big_methylome &bmeth,
   const auto zipped =
     std::views::zip(index.data.positions, index.meta.chrom_order);
   for (const auto [positions, chrom_name] : zipped) {
-    const int m = std::sprintf(buf.data(), "%s\t", chrom_name.data());
-    if (m <= 0)
+    const int m =
+      std::snprintf(buf.data(), buf_size, "%s\t", chrom_name.data());
+    if (m < 0 || m > buf_size)
       throw std::runtime_error("failed writing output");
     auto cursor = buf.data() + m;
     auto format_site = [&](const std::uint32_t pos, const big_mcount_pair &p) {
-      return std::sprintf(cursor, "%d\t+\tCpG\t%.6g\t%d\n", pos + 1,
-                          p.get_level(), p.n_reads());
+      return std::snprintf(cursor, buf_size, "%u\t+\tCpG\t%.6g\t%d\n", pos + 1,
+                           p.get_level(), p.n_reads());
     };
     for (const auto pos : positions) {
       const int n = format_site(pos, *cpg_itr);
-      if (n <= 0)
+      if (n < 0 || n > buf_size)
         throw std::runtime_error("failed writing output");
       out.write(buf.data(), m + n);
       ++cpg_itr;
@@ -360,9 +362,11 @@ main(int argc, char *argv[]) -> int {  // NOLINT(*-c-arrays)
 
     lgr.info("Making levels bigWig track");
     const auto levels_start = std::chrono::high_resolution_clock::now();
-    auto format_site_levels = [](auto &buf, const std::uint32_t pos,
+    auto format_site_levels = [](auto &buf, const auto buf_size,
+                                 const std::uint32_t pos,
                                  const big_mcount_pair &p) {
-      return std::sprintf(buf.data(), "%d %0.6g\n", pos + 1, p.get_level());
+      return std::snprintf(buf.data(), buf_size, "%u %0.6g\n", pos + 1,
+                           p.get_level());
     };
     auto outfile =
       std::filesystem::path{outdir} / std::format("{}.meth.wig", merged_name);
@@ -373,9 +377,11 @@ main(int argc, char *argv[]) -> int {  // NOLINT(*-c-arrays)
 
     lgr.info("Making reads bigWig track");
     const auto reads_start = std::chrono::high_resolution_clock::now();
-    auto format_site_reads = [](auto &buf, const std::uint32_t pos,
+    auto format_site_reads = [](auto &buf, const auto buf_size,
+                                const std::uint32_t pos,
                                 const big_mcount_pair &p) {
-      return std::sprintf(buf.data(), "%d %d\n", pos + 1, p.n_reads());
+      return std::snprintf(buf.data(), buf_size, "%u %d\n", pos + 1,
+                           p.n_reads());
     };
 
     outfile =
