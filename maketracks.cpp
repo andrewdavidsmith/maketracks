@@ -149,7 +149,7 @@ merge_methylomes(const std::vector<std::string> &methylome_names,
     const auto is_consistent = last_meth.is_consistent(tmp_meth);
     if (!is_consistent) {
       lgr.error("Inconsistent metadata: {} {}", last_methylome, name);
-      return EXIT_FAILURE;
+      throw std::runtime_error("Inconsistent metadata");
     }
     const auto merge_start = std::chrono::high_resolution_clock::now();
     bmeth.add(tmp_meth);
@@ -208,6 +208,39 @@ write_bigwig(const std::string outfile, const big_methylome &bmeth,
   }
 }
 
+static inline auto
+write_sym(const std::string outfile, const big_methylome &bmeth,
+          const xfr::genome_index &index) {
+  static constexpr auto buf_size = 128u;
+  std::array<char, buf_size> buf{};
+
+  std::ofstream out(outfile);
+  if (!out)
+    throw std::runtime_error(
+      std::format("Failed to open output file {}", outfile));
+
+  auto cpg_itr = std::cbegin(bmeth.cpgs);
+  const auto zipped =
+    std::views::zip(index.data.positions, index.meta.chrom_order);
+  for (const auto [positions, chrom_name] : zipped) {
+    const int m = std::sprintf(buf.data(), "%s\t", chrom_name.data());
+    if (m <= 0)
+      throw std::runtime_error("failed writing output");
+    auto cursor = buf.data() + m;
+    auto format_site = [&](const std::uint32_t pos, const big_mcount_pair &p) {
+      return std::sprintf(cursor, "%d\t+\tCpG\t%.6g\t%d\n", pos + 1,
+                          p.get_level(), p.n_reads());
+    };
+    for (const auto pos : positions) {
+      const int n = format_site(pos, *cpg_itr);
+      if (n <= 0)
+        throw std::runtime_error("failed writing output");
+      out.write(buf.data(), m + n);
+      ++cpg_itr;
+    }
+  }
+}
+
 [[nodiscard]] static inline auto
 read_methylomes_file(const std::string &filename,
                      std::error_code &ec) -> std::vector<std::string> {
@@ -246,6 +279,8 @@ main(int argc, char *argv[]) -> int {  // NOLINT(*-c-arrays)
     std::string genome_name{};
     std::string merged_name{};
 
+    bool write_sym_file{};
+
     CLI::App app{about_msg};
     argv = app.ensure_utf8(argv);
     app.usage(usage);
@@ -255,6 +290,7 @@ main(int argc, char *argv[]) -> int {  // NOLINT(*-c-arrays)
     app.get_formatter()->label("REQUIRED", "REQD");
     app.set_help_flag("-h,--help", "Print a detailed help message and exit");
     // clang-format off
+    app.add_flag("--sym", write_sym_file, "write sym counts file");
     app.add_option("-m,--methylome", methylome_names_file, "file with methylome names");
     app.add_option("-d,--methylome-dir", methylome_dir, "input methylome directory")
       ->required()
@@ -349,6 +385,13 @@ main(int argc, char *argv[]) -> int {  // NOLINT(*-c-arrays)
     const auto reads_stop = std::chrono::high_resolution_clock::now();
     lgr.debug("Time to make reads bigWig track: {:.3}s",
               duration(reads_start, reads_stop));
+
+    if (write_sym_file) {
+      lgr.info("Making symmetric CpGs counts file");
+      const auto sym_file =
+        std::filesystem::path{outdir} / std::format("{}.sym", merged_name);
+      write_sym(sym_file, bmeth, index);
+    }
   }
   catch (const std::exception &e) {
     std::cerr << e.what() << std::endl;
